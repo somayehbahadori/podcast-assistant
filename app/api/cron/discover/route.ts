@@ -10,7 +10,8 @@ export async function GET(request: Request) {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  const publishedAfter = new Date(Date.now() - 72 * 60 * 60 * 1000)
+  const hours = parseInt(new URL(request.url).searchParams.get('hours') ?? '72')
+  const publishedAfter = new Date(Date.now() - hours * 60 * 60 * 1000)
 
   const [youtubeEpisodes, rssEpisodes] = await Promise.allSettled([
     fetchYouTubeEpisodes(publishedAfter),
