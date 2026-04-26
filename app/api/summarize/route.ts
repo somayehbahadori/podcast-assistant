@@ -1,4 +1,5 @@
-import { streamText, gateway } from 'ai'
+import { streamText } from 'ai'
+import { anthropic } from '@ai-sdk/anthropic'
 import { getEpisode, saveSummary, markSummarized } from '@/lib/redis'
 import { Summary } from '@/lib/types'
 
@@ -34,7 +35,7 @@ Produce a JSON response with these exact keys:
 Respond ONLY with valid JSON, no markdown code blocks.`
 
   const result = streamText({
-    model: gateway('anthropic/claude-sonnet-4-6'),
+    model: anthropic('claude-sonnet-4-6'),
     prompt,
     onFinish: async ({ text }) => {
       try {
