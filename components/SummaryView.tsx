@@ -9,36 +9,36 @@ interface Props {
 export default function SummaryView({ summary }: Props) {
   return (
     <div className="space-y-6" dir="rtl">
-      <Card>
+      <Card className="border-blue-500/40 bg-blue-950/30">
         <CardHeader>
-          <CardTitle className="text-base font-semibold text-muted-foreground flex items-center gap-2">
+          <CardTitle className="text-base font-semibold text-blue-300 flex items-center gap-2">
             📝 خلاصه انگلیسی
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm leading-relaxed whitespace-pre-wrap" dir="ltr">{summary.englishSummary}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap text-blue-100" dir="ltr">{summary.englishSummary}</p>
         </CardContent>
       </Card>
 
-      <Separator />
+      <Separator className="bg-blue-500/30" />
 
-      <Card>
+      <Card className="border-blue-500/40 bg-blue-950/30">
         <CardHeader>
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <CardTitle className="text-base font-semibold text-blue-300 flex items-center gap-2">
             🔵 توضیحات جامع فارسی
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="leading-8 text-base whitespace-pre-wrap">{summary.persianContent}</p>
+          <p className="leading-8 text-base whitespace-pre-wrap text-blue-100">{summary.persianContent}</p>
         </CardContent>
       </Card>
 
       {summary.podcastSuggestions.length > 0 && (
         <>
-          <Separator />
-          <Card>
+          <Separator className="bg-blue-500/30" />
+          <Card className="border-blue-500/40 bg-blue-950/30">
             <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <CardTitle className="text-base font-semibold text-blue-300 flex items-center gap-2">
                 💡 پیشنهاد برای پادکست فارسی
               </CardTitle>
             </CardHeader>
@@ -46,8 +46,8 @@ export default function SummaryView({ summary }: Props) {
               <ol className="space-y-3">
                 {summary.podcastSuggestions.map((s, i) => (
                   <li key={i} className="flex gap-3">
-                    <span className="font-bold text-primary min-w-5">{i + 1}.</span>
-                    <span className="leading-7">{s}</span>
+                    <span className="font-bold text-blue-400 min-w-5">{i + 1}.</span>
+                    <span className="leading-7 text-blue-100">{s}</span>
                   </li>
                 ))}
               </ol>
@@ -56,7 +56,7 @@ export default function SummaryView({ summary }: Props) {
         </>
       )}
 
-      <p className="text-xs text-muted-foreground text-left">
+      <p className="text-xs text-blue-400/70 text-left">
         تولیدشده در {new Date(summary.generatedAt).toLocaleString('fa-IR')}
       </p>
     </div>
