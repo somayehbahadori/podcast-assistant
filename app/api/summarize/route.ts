@@ -1,5 +1,3 @@
-import { streamText } from 'ai'
-import { anthropic } from '@ai-sdk/anthropic'
 import { getEpisode, saveSummary, markSummarized } from '@/lib/redis'
 import { Summary } from '@/lib/types'
 
@@ -34,12 +32,61 @@ Produce a JSON response with these exact keys:
 
 Respond ONLY with valid JSON, no markdown code blocks.`
 
-  const result = streamText({
-    model: anthropic('claude-sonnet-4-6'),
-    prompt,
-    onFinish: async ({ text }) => {
+  const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': process.env.ANTHROPIC_API_KEY!,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      stream: true,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  if (!anthropicRes.ok || !anthropicRes.body) {
+    const err = await anthropicRes.text()
+    return new Response(`Anthropic error: ${err}`, { status: 500 })
+  }
+
+  const { readable, writable } = new TransformStream()
+  const writer = writable.getWriter()
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+
+  ;(async () => {
+    let fullText = ''
+    let buffer = ''
+    const reader = anthropicRes.body!.getReader()
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+              const chunk = parsed.delta.text as string
+              fullText += chunk
+              await writer.write(encoder.encode(chunk))
+            }
+          } catch { /* skip malformed SSE lines */ }
+        }
+      }
+    } finally {
       try {
-        const parsed = JSON.parse(text)
+        const parsed = JSON.parse(fullText)
         const summary: Summary = {
           episodeId,
           englishSummary: parsed.englishSummary ?? '',
@@ -50,19 +97,21 @@ Respond ONLY with valid JSON, no markdown code blocks.`
         await saveSummary(summary)
         await markSummarized(episodeId)
       } catch {
-        // JSON parse failed — save raw text as persianContent
         const summary: Summary = {
           episodeId,
           englishSummary: '',
-          persianContent: text,
+          persianContent: fullText,
           podcastSuggestions: [],
           generatedAt: new Date().toISOString(),
         }
         await saveSummary(summary)
         await markSummarized(episodeId)
       }
-    },
-  })
+      await writer.close()
+    }
+  })()
 
-  return result.toTextStreamResponse()
+  return new Response(readable, {
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  })
 }
