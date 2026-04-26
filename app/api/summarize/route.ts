@@ -34,7 +34,7 @@ Produce a JSON response with these exact keys:
 Respond ONLY with valid JSON, no markdown code blocks.`
 
   const result = streamText({
-    model: gateway('anthropic/claude-sonnet-4.6'),
+    model: gateway('anthropic/claude-sonnet-4-6'),
     prompt,
     onFinish: async ({ text }) => {
       try {
