@@ -73,7 +73,7 @@ Redis keys: `episode:<id>` (JSON), `episodes:recent` (sorted set, score = publis
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis token |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 |
 | `CRON_SECRET` | Bearer token for cron endpoint |
-| `AI_GATEWAY_TOKEN` | Vercel AI Gateway token |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway token |
 
 ## Development Notes
 
