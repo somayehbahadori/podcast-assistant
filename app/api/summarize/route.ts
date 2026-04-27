@@ -86,6 +86,7 @@ Create a comprehensive structured summary following the format above.`
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
+      stream: true,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     }),
@@ -96,20 +97,59 @@ Create a comprehensive structured summary following the format above.`
     return new Response(`Anthropic error: ${err}`, { status: 500 })
   }
 
-  const data = await anthropicRes.json()
-  const text: string = data.content?.[0]?.text ?? ''
+  const reader = anthropicRes.body!.getReader()
+  const decoder = new TextDecoder()
+  let fullText = ''
 
-  const summary: Summary = {
-    episodeId,
-    englishSummary: '',
-    persianContent: text,
-    podcastSuggestions: [],
-    generatedAt: new Date().toISOString(),
-  }
-  await saveSummary(summary)
-  await markSummarized(episodeId)
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-  return new Response(text, {
+          const chunk = decoder.decode(value, { stream: true })
+          for (const line of chunk.split('\n')) {
+            if (!line.startsWith('data: ')) continue
+            const data = line.slice(6).trim()
+            if (!data || data === '[DONE]') continue
+            try {
+              const parsed = JSON.parse(data)
+              if (
+                parsed.type === 'content_block_delta' &&
+                parsed.delta?.type === 'text_delta'
+              ) {
+                const text: string = parsed.delta.text
+                fullText += text
+                controller.enqueue(encoder.encode(text))
+              }
+            } catch {
+              // ignore malformed SSE lines
+            }
+          }
+        }
+      } finally {
+        // Save to Redis before closing — runs even if an error occurred
+        const summary: Summary = {
+          episodeId,
+          englishSummary: '',
+          persianContent: fullText,
+          podcastSuggestions: [],
+          generatedAt: new Date().toISOString(),
+        }
+        try {
+          await saveSummary(summary)
+          await markSummarized(episodeId)
+        } catch {
+          // Redis failure should not break the response
+        }
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(stream, {
     headers: { 'Content-Type': 'text/plain; charset=utf-8' },
   })
 }
