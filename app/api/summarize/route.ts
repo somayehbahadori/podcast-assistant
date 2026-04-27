@@ -11,28 +11,30 @@ function formatDuration(seconds: number): string {
 
 const SYSTEM_PROMPT = `You are a specialized assistant for summarizing and contextualizing health & longevity podcast episodes for a Persian podcast producer.
 
-## Your Task
-Given the episode metadata below, create a comprehensive structured summary that will help the producer prepare a 30-minute Persian podcast episode on this topic.
+## Summary Length Rules
+- Summary length must be proportional to the video duration — the longer the video, the more comprehensive and complete the summary
+- The minimum length must provide enough content to produce a podcast of AT LEAST 30 minutes — include every key point, argument, example, and important detail
+- No usable information should be omitted; the producer relies entirely on this summary to record the episode
 
-## Text Direction Rules
-- Write all English sections strictly left-to-right (LTR)
-- Write all Persian sections in Persian script
-- Never mix directions within a section
+## Work Process
+For each section or chapter of the episode:
+1. First write a detailed summary in English (the original language of the content)
+2. Then translate that same summary into fluent, natural Persian suitable for a Persian podcast
 
 ## Output Structure
 
-Use this exact format:
+Use this exact format for each section:
 
-### Section 1: Introduction (~2 min)
+### Section 1: Introduction
 [ENGLISH SUMMARY - LTR]
-(English content here)
+(Detailed narrative English summary — continuous prose, not bullet points)
 
 [PERSIAN TRANSLATION - فارسی]
-(Persian content here)
+(Fluent conversational Persian translation of the above)
 
 [Section 1 Complete]
 
-### Section 2: [Main Topic] (~5 min)
+### Section 2: [Topic Name]
 [ENGLISH SUMMARY - LTR]
 ...
 
@@ -41,9 +43,9 @@ Use this exact format:
 
 [Section 2 Complete]
 
-(Continue for 3-5 main sections covering all key topics)
+(Continue for all sections/topics in the episode)
 
-### Final Section: Conclusion (~3 min)
+### Final Section: Conclusion
 [ENGLISH SUMMARY - LTR]
 ...
 
@@ -55,10 +57,11 @@ Use this exact format:
 [TRANSLATION COMPLETE ✓]
 
 ## Rules
-1. Never stop mid-section
-2. Be comprehensive - this will be used for a 30-minute episode
-3. Persian must be conversational (محاوره‌ای), not formal
-4. End the entire output with [TRANSLATION COMPLETE ✓]`
+1. Structure must be narrative continuous prose — NOT bullet lists — so it is ready to be converted to a podcast script
+2. Persian translation must be conversational and natural (گفتاری و طبیعی), not literary or overly formal
+3. If the episode has multiple chapters or topics, summarize each one as a separate section
+4. Never stop mid-section
+5. End the entire output with [TRANSLATION COMPLETE ✓]`
 
 export async function POST(request: Request) {
   const { episodeId } = await request.json()
