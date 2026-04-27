@@ -88,7 +88,7 @@ Create a comprehensive structured summary following the format above.`
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 3000,
       stream: true,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
