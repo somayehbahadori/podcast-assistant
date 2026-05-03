@@ -61,8 +61,8 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
       .replace(/\s+/g, ' ')
       .trim() ?? ''
 
-    // Cap at ~40 000 chars (~10 000 tokens) so we stay within context limits
-    return text.slice(0, 40000)
+    // Cap at ~80 000 chars — covers up to ~100 min of speech
+    return text.slice(0, 80000)
   } catch {
     return ''
   }
@@ -169,7 +169,7 @@ Create a comprehensive structured summary following the format above.`
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
+      max_tokens: 6000,
       stream: true,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
