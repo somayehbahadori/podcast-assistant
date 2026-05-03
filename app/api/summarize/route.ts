@@ -9,6 +9,65 @@ function formatDuration(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
+async function fetchYouTubeTranscript(videoId: string): Promise<string> {
+  try {
+    const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    })
+    if (!pageRes.ok) return ''
+    const html = await pageRes.text()
+
+    // Find the captionTracks array in the page data
+    const idx = html.indexOf('"captionTracks":')
+    if (idx === -1) return ''
+
+    const arrayStart = html.indexOf('[', idx)
+    if (arrayStart === -1) return ''
+
+    // Walk forward counting [ ] to find the matching close bracket
+    let depth = 0
+    let arrayEnd = -1
+    for (let i = arrayStart; i < Math.min(html.length, arrayStart + 50000); i++) {
+      if (html[i] === '[') depth++
+      else if (html[i] === ']') {
+        depth--
+        if (depth === 0) { arrayEnd = i; break }
+      }
+    }
+    if (arrayEnd === -1) return ''
+
+    const tracks = JSON.parse(html.slice(arrayStart, arrayEnd + 1))
+    if (!Array.isArray(tracks) || !tracks.length) return ''
+
+    // Prefer manual English captions, then auto-generated English, then first available
+    const track =
+      tracks.find((t: { languageCode?: string; kind?: string }) => t.languageCode === 'en' && !t.kind) ||
+      tracks.find((t: { languageCode?: string }) => t.languageCode === 'en') ||
+      tracks[0]
+
+    if (!track?.baseUrl) return ''
+
+    const transcriptRes = await fetch(track.baseUrl + '&fmt=json3')
+    if (!transcriptRes.ok) return ''
+
+    const data = await transcriptRes.json()
+    const text: string = (data.events as Array<{ segs?: Array<{ utf8: string }> }>)
+      ?.filter(e => e.segs)
+      .map(e => e.segs!.map(s => s.utf8).join(''))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim() ?? ''
+
+    // Cap at ~40 000 chars (~10 000 tokens) so we stay within context limits
+    return text.slice(0, 40000)
+  } catch {
+    return ''
+  }
+}
+
 const SYSTEM_PROMPT = `You are a specialized assistant for summarizing and contextualizing health & longevity podcast episodes for a Persian podcast producer.
 
 ## Summary Length Rules
@@ -70,7 +129,29 @@ export async function POST(request: Request) {
   const episode = await getEpisode(episodeId)
   if (!episode) return new Response('Episode not found', { status: 404 })
 
-  const userMessage = `Episode details:
+  // Fetch the actual transcript for YouTube episodes
+  let transcript = ''
+  if (episode.platform === 'youtube') {
+    try {
+      const videoId = new URL(episode.url).searchParams.get('v') ?? ''
+      if (videoId) transcript = await fetchYouTubeTranscript(videoId)
+    } catch {
+      // fall through to description-only
+    }
+  }
+
+  const userMessage = transcript
+    ? `Episode details:
+- Title: ${episode.title}
+- Channel: ${episode.channelName}
+- Duration: ${formatDuration(episode.durationSeconds)}
+- Topics: ${episode.topics.join(', ')}
+
+Full transcript:
+${transcript}
+
+Summarize the actual transcript above following the format in your instructions.`
+    : `Episode details:
 - Title: ${episode.title}
 - Channel: ${episode.channelName}
 - Duration: ${formatDuration(episode.durationSeconds)}
@@ -133,7 +214,6 @@ Create a comprehensive structured summary following the format above.`
           }
         }
       } finally {
-        // Save to Redis before closing — runs even if an error occurred
         const summary: Summary = {
           episodeId,
           englishSummary: '',
