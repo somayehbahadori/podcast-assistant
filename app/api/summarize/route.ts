@@ -1,7 +1,10 @@
-import { getEpisode, saveSummary, markSummarized } from '@/lib/redis'
+import { getEpisode, saveSummary, markSummarized, cacheTranscript, getCachedTranscript } from '@/lib/redis'
 import { Summary } from '@/lib/types'
 
 export const maxDuration = 60
+
+const CHUNK_SIZE = 35000   // chars per call (~9 min of speech)
+const MAX_TOKENS = 2500    // output tokens per call — Haiku generates this in ~17s
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -20,14 +23,12 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
     if (!pageRes.ok) return ''
     const html = await pageRes.text()
 
-    // Find the captionTracks array in the page data
     const idx = html.indexOf('"captionTracks":')
     if (idx === -1) return ''
 
     const arrayStart = html.indexOf('[', idx)
     if (arrayStart === -1) return ''
 
-    // Walk forward counting [ ] to find the matching close bracket
     let depth = 0
     let arrayEnd = -1
     for (let i = arrayStart; i < Math.min(html.length, arrayStart + 50000); i++) {
@@ -42,7 +43,6 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
     const tracks = JSON.parse(html.slice(arrayStart, arrayEnd + 1))
     if (!Array.isArray(tracks) || !tracks.length) return ''
 
-    // Prefer manual English captions, then auto-generated English, then first available
     const track =
       tracks.find((t: { languageCode?: string; kind?: string }) => t.languageCode === 'en' && !t.kind) ||
       tracks.find((t: { languageCode?: string }) => t.languageCode === 'en') ||
@@ -61,8 +61,7 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
       .replace(/\s+/g, ' ')
       .trim() ?? ''
 
-    // Cap at ~80 000 chars — covers up to ~100 min of speech
-    return text.slice(0, 80000)
+    return text
   } catch {
     return ''
   }
@@ -70,87 +69,77 @@ async function fetchYouTubeTranscript(videoId: string): Promise<string> {
 
 const SYSTEM_PROMPT = `You are a specialized assistant for summarizing and contextualizing health & longevity podcast episodes for a Persian podcast producer.
 
-## Summary Length Rules
-- Summary length must be proportional to the video duration — the longer the video, the more comprehensive and complete the summary
-- The minimum length must provide enough content to produce a podcast of AT LEAST 30 minutes — include every key point, argument, example, and important detail
-- No usable information should be omitted; the producer relies entirely on this summary to record the episode
-
 ## Work Process
-For each section or chapter of the episode:
-1. First write a detailed summary in English (the original language of the content)
-2. Then translate that same summary into fluent, natural Persian suitable for a Persian podcast
+For each section or chapter:
+1. Write a detailed English summary first (narrative prose, NOT bullet points)
+2. Then translate it into fluent conversational Persian (گفتاری و طبیعی)
 
-## Output Structure
+## Output Format
 
-Use this exact format for each section:
-
-### Section 1: Introduction
+### Section 1: [Topic Name]
 [ENGLISH SUMMARY - LTR]
-(Detailed narrative English summary — continuous prose, not bullet points)
+(Detailed narrative English prose)
 
 [PERSIAN TRANSLATION - فارسی]
-(Fluent conversational Persian translation of the above)
+(Fluent conversational Persian translation)
 
 [Section 1 Complete]
 
-### Section 2: [Topic Name]
-[ENGLISH SUMMARY - LTR]
-...
-
-[PERSIAN TRANSLATION - فارسی]
-...
-
-[Section 2 Complete]
-
-(Continue for all sections/topics in the episode)
-
-### Final Section: Conclusion
-[ENGLISH SUMMARY - LTR]
-...
-
-[PERSIAN TRANSLATION - فارسی]
-...
-
-[Section Complete]
-
-[TRANSLATION COMPLETE ✓]
+(Repeat for each topic covered)
 
 ## Rules
-1. Structure must be narrative continuous prose — NOT bullet lists — so it is ready to be converted to a podcast script
-2. Persian translation must be conversational and natural (گفتاری و طبیعی), not literary or overly formal
-3. If the episode has multiple chapters or topics, summarize each one as a separate section
-4. Never stop mid-section
-5. End the entire output with [TRANSLATION COMPLETE ✓]`
+1. Narrative continuous prose only — no bullet lists
+2. Persian must be conversational, not formal
+3. Cover every key point, argument, example, and detail
+4. Only write [TRANSLATION COMPLETE ✓] when explicitly told this is the final portion`
 
 export async function POST(request: Request) {
-  const { episodeId } = await request.json()
+  const { episodeId, offset = 0, previousText = '' } = await request.json()
   if (!episodeId) return new Response('Missing episodeId', { status: 400 })
 
   const episode = await getEpisode(episodeId)
   if (!episode) return new Response('Episode not found', { status: 404 })
 
-  // Fetch the actual transcript for YouTube episodes
+  // Fetch transcript — use Redis cache to avoid re-fetching on each chunk
   let transcript = ''
   if (episode.platform === 'youtube') {
-    try {
-      const videoId = new URL(episode.url).searchParams.get('v') ?? ''
-      if (videoId) transcript = await fetchYouTubeTranscript(videoId)
-    } catch {
-      // fall through to description-only
+    const cached = await getCachedTranscript(episodeId)
+    if (cached) {
+      transcript = cached
+    } else {
+      try {
+        const videoId = new URL(episode.url).searchParams.get('v') ?? ''
+        if (videoId) {
+          transcript = await fetchYouTubeTranscript(videoId)
+          if (transcript) await cacheTranscript(episodeId, transcript)
+        }
+      } catch {
+        // fall through to description-only
+      }
     }
   }
 
-  const userMessage = transcript
-    ? `Episode details:
-- Title: ${episode.title}
-- Channel: ${episode.channelName}
-- Duration: ${formatDuration(episode.durationSeconds)}
-- Topics: ${episode.topics.join(', ')}
+  const transcriptChunk = transcript.slice(offset, offset + CHUNK_SIZE)
+  const hasMore = transcript.length > offset + CHUNK_SIZE
+  const isFirst = offset === 0
 
-Full transcript:
-${transcript}
+  let chunkInstruction = ''
+  if (transcript) {
+    if (isFirst && hasMore) {
+      chunkInstruction = '\n\nThis is the FIRST portion of a longer transcript. Summarize only what is covered here. Do NOT write [TRANSLATION COMPLETE ✓] — more content follows.'
+    } else if (!isFirst && hasMore) {
+      chunkInstruction = '\n\nThis is a CONTINUATION. Summarize only the new topics in this portion. Do NOT write [TRANSLATION COMPLETE ✓] — more content follows.'
+    } else if (!isFirst && !hasMore) {
+      chunkInstruction = '\n\nThis is the FINAL portion. Summarize remaining topics and write a conclusion section. End with [TRANSLATION COMPLETE ✓].'
+    }
+    // isFirst && !hasMore: single chunk, use normal [TRANSLATION COMPLETE ✓] from system prompt
+  }
 
-Summarize the actual transcript above following the format in your instructions.`
+  const userMessage = transcriptChunk
+    ? `Episode: "${episode.title}" by ${episode.channelName} (${formatDuration(episode.durationSeconds)})
+
+Transcript:
+${transcriptChunk}${chunkInstruction}`
     : `Episode details:
 - Title: ${episode.title}
 - Channel: ${episode.channelName}
@@ -158,7 +147,7 @@ Summarize the actual transcript above following the format in your instructions.
 - Topics: ${episode.topics.join(', ')}
 - Description: ${episode.description}
 
-Create a comprehensive structured summary following the format above.`
+Create a comprehensive structured summary. End with [TRANSLATION COMPLETE ✓].`
 
   const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -169,7 +158,7 @@ Create a comprehensive structured summary following the format above.`
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 6000,
+      max_tokens: MAX_TOKENS,
       stream: true,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
@@ -183,7 +172,14 @@ Create a comprehensive structured summary following the format above.`
 
   const reader = anthropicRes.body!.getReader()
   const decoder = new TextDecoder()
-  let fullText = ''
+  let chunkText = ''
+
+  const responseHeaders: Record<string, string> = {
+    'Content-Type': 'text/plain; charset=utf-8',
+  }
+  if (hasMore) {
+    responseHeaders['X-Next-Offset'] = String(offset + CHUNK_SIZE)
+  }
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -193,19 +189,16 @@ Create a comprehensive structured summary following the format above.`
           const { done, value } = await reader.read()
           if (done) break
 
-          const chunk = decoder.decode(value, { stream: true })
-          for (const line of chunk.split('\n')) {
+          const raw = decoder.decode(value, { stream: true })
+          for (const line of raw.split('\n')) {
             if (!line.startsWith('data: ')) continue
             const data = line.slice(6).trim()
             if (!data || data === '[DONE]') continue
             try {
               const parsed = JSON.parse(data)
-              if (
-                parsed.type === 'content_block_delta' &&
-                parsed.delta?.type === 'text_delta'
-              ) {
+              if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                 const text: string = parsed.delta.text
-                fullText += text
+                chunkText += text
                 controller.enqueue(encoder.encode(text))
               }
             } catch {
@@ -214,25 +207,27 @@ Create a comprehensive structured summary following the format above.`
           }
         }
       } finally {
-        const summary: Summary = {
-          episodeId,
-          englishSummary: '',
-          persianContent: fullText,
-          podcastSuggestions: [],
-          generatedAt: new Date().toISOString(),
-        }
-        try {
-          await saveSummary(summary)
-          await markSummarized(episodeId)
-        } catch {
-          // Redis failure should not break the response
+        // Save to Redis only on the last chunk
+        if (!hasMore) {
+          const fullText = previousText + chunkText
+          const summary: Summary = {
+            episodeId,
+            englishSummary: '',
+            persianContent: fullText,
+            podcastSuggestions: [],
+            generatedAt: new Date().toISOString(),
+          }
+          try {
+            await saveSummary(summary)
+            await markSummarized(episodeId)
+          } catch {
+            // Redis failure should not break the response
+          }
         }
         controller.close()
       }
     },
   })
 
-  return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-  })
+  return new Response(stream, { headers: responseHeaders })
 }
