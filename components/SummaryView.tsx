@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Summary } from '@/lib/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -8,7 +9,7 @@ interface Props {
 
 // Renders Persian content — converts **[تیتر]** markers into styled section headers
 // and the 📌 glossary box into a highlighted block.
-function renderPersianContent(text: string): React.ReactNode[] {
+function renderPersianContent(text: string): ReactNode[] {
   const cleaned = text
     .replace(/\[TRANSLATION COMPLETE ✓\]/g, '')
     .replace(/\[Section \d+ Complete\]/g, '')
