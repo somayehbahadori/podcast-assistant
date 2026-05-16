@@ -80,7 +80,14 @@ export default async function EpisodePage({ params }: Props) {
         <Separator />
 
         {summary ? (
-          <SummaryView summary={summary} />
+          <div className="space-y-6">
+            <SummaryView summary={summary} />
+            <Separator />
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">برای بازتولید خلاصه با پرامپت جدید:</p>
+              <SummarizeButton episodeId={episodeId} />
+            </div>
+          </div>
         ) : (
           <div className="space-y-4">
             <div>
