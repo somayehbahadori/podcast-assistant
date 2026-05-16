@@ -30,7 +30,7 @@ export default function SummarizeButton({ episodeId }: Props) {
         currentPart++
         setPart(currentPart)
 
-        const res = await fetch('/api/summarize', {
+        const res: Response = await fetch('/api/summarize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ episodeId, offset, previousText: accumulated }),
