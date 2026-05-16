@@ -119,18 +119,29 @@ export async function POST(request: Request) {
     }
   }
 
+  // If this is a continuation chunk and the transcript is unavailable, abort rather than
+  // silently saving a description-only summary as if the video were fully covered.
+  if (offset > 0 && !transcript) {
+    return new Response('Transcript unavailable for continuation — please try again', { status: 500 })
+  }
+
   const transcriptChunk = transcript.slice(offset, offset + CHUNK_SIZE)
   const hasMore = transcript.length > offset + CHUNK_SIZE
   const isFirst = offset === 0
+
+  // Last 300 chars of previous output — lets Claude resume mid-sentence instead of restarting.
+  const tailContext = previousText
+    ? `\n\nThe previous chunk was cut off mid-text ending with: "...${previousText.slice(-300)}"\nResume exactly from where it cut off — do not restart or repeat earlier sections.`
+    : ''
 
   let chunkInstruction = ''
   if (transcript) {
     if (isFirst && hasMore) {
       chunkInstruction = '\n\nThis is the FIRST portion of a longer transcript. Summarize only what is covered here. Do NOT write [TRANSLATION COMPLETE ✓] — more content follows.'
     } else if (!isFirst && hasMore) {
-      chunkInstruction = '\n\nThis is a CONTINUATION. Summarize only the new topics in this portion. Do NOT write [TRANSLATION COMPLETE ✓] — more content follows.'
+      chunkInstruction = `${tailContext}\n\nThis is a CONTINUATION. Resume from exactly where the previous output was cut off. Do NOT write [TRANSLATION COMPLETE ✓] — more content follows.`
     } else if (!isFirst && !hasMore) {
-      chunkInstruction = '\n\nThis is the FINAL portion. Summarize remaining topics and write a conclusion section. End with [TRANSLATION COMPLETE ✓].'
+      chunkInstruction = `${tailContext}\n\nThis is the FINAL portion. Resume and complete any section that was cut off, then cover remaining topics and write a conclusion. End with [TRANSLATION COMPLETE ✓].`
     }
     // isFirst && !hasMore: single chunk, use normal [TRANSLATION COMPLETE ✓] from system prompt
   }

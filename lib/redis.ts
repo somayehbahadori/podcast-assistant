@@ -66,7 +66,7 @@ export async function getSummary(episodeId: string): Promise<Summary | null> {
 
 export async function cacheTranscript(episodeId: string, transcript: string): Promise<void> {
   const redis = getRedis()
-  await redis.set(`transcript:${episodeId}`, transcript, { ex: 3600 })
+  await redis.set(`transcript:${episodeId}`, transcript, { ex: 86400 })
 }
 
 export async function getCachedTranscript(episodeId: string): Promise<string | null> {
